@@ -126,16 +126,20 @@ def clean_stage_and_packages() -> None:
 
 
 def stage_files(skip_web: bool) -> None:
-    binary = ROOT / "target" / "release" / "cocktail-control"
-    if not binary.is_file():
-        raise RuntimeError(f"release binary is missing: {binary}")
+    binaries = [
+        ROOT / "target" / "release" / name
+        for name in ("cocktail-control", "cocktail-init")
+    ]
+    for binary in binaries:
+        if not binary.is_file():
+            raise RuntimeError(f"release binary is missing: {binary}")
 
     bin_dir = STAGE / "usr" / "bin"
     web_dir = STAGE / "usr" / "share" / "cocktail" / "web"
     bin_dir.mkdir(parents=True)
-    shutil.copy2(binary, bin_dir / binary.name)
-    (bin_dir / binary.name).chmod(0o755)
-
+    for binary in binaries:
+        shutil.copy2(binary, bin_dir / binary.name)
+        (bin_dir / binary.name).chmod(0o755)
     source_web = ROOT / "admin" / "dist"
     if skip_web and not source_web.is_dir():
         raise RuntimeError("admin/dist is missing; omit --skip-web to build it.")
@@ -149,7 +153,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--format", choices=("all", "deb", "rpm"), default="all")
     parser.add_argument("--version", help="override the version from Cargo.toml")
     parser.add_argument("--arch", default=platform.machine(), help="target architecture (default: host)")
-    parser.add_argument("--skip-build", action="store_true", help="reuse target/release/cocktail-control")
+    parser.add_argument("--skip-build", action="store_true", help="reuse target/release/cocktail-control and cocktail-init")
     parser.add_argument("--skip-web", action="store_true", help="reuse admin/dist instead of running npm")
     parser.add_argument("--nfpm", help="path to an existing nfpm executable")
     return parser.parse_args()
@@ -162,7 +166,19 @@ def main() -> int:
     print(f"==> version={version} deb_arch={deb_arch} rpm_arch={rpm_arch}")
 
     if not args.skip_build:
-        run(["cargo", "build", "-p", "cocktail-control", "--release", "--bin", "cocktail-control"])
+        run([
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "cocktail-control",
+            "-p",
+            "cocktail-init",
+            "--bin",
+            "cocktail-control",
+            "--bin",
+            "cocktail-init",
+        ])
     if not args.skip_web:
         run(["npm", "ci"], cwd=ROOT / "admin")
         run(["npm", "run", "build"], cwd=ROOT / "admin")
