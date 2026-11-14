@@ -1691,8 +1691,11 @@ export const api = {
     }),
   totpStatus: () =>
     request<{ enabled: boolean }>('/api/v1/auth/2fa/status'),
-  totpDisable: () =>
-    request<{ ok: boolean }>('/api/v1/auth/2fa/disable', { method: 'POST' }),
+  totpDisable: (body?: { password?: string; totp_code?: number }) =>
+    request<{ ok: boolean }>('/api/v1/auth/2fa/disable', {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
 
   listUsers: () => request<PanelUser[]>('/api/v1/users'),
   createUser: (body: { username: string; password: string; role: string }) =>

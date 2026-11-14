@@ -12,6 +12,8 @@ export default function TwoFactorPanel({ onError }: Props) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
+  const [disablePass, setDisablePass] = useState('')
+  const [disableCode, setDisableCode] = useState('')
 
   const load = async () => {
     try {
@@ -64,13 +66,20 @@ export default function TwoFactorPanel({ onError }: Props) {
   }
 
   const disable = async () => {
+    const pin = Number(disableCode.trim())
+    if (!disablePass.trim() || !Number.isFinite(pin) || pin <= 0) {
+      onError('关闭 2FA 需要输入登录密码和当前验证码')
+      return
+    }
     if (!window.confirm('关闭双因素认证？之后登录只需要密码。')) return
     setBusy(true)
     onError(null)
     try {
-      await api.totpDisable()
+      await api.totpDisable({ password: disablePass, totp_code: pin })
       setEnabled(false)
       setDone(false)
+      setDisablePass('')
+      setDisableCode('')
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -86,9 +95,32 @@ export default function TwoFactorPanel({ onError }: Props) {
         {enabled ? '已开启' : '未开启'}
       </p>
       {enabled ? (
-        <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void disable()}>
-          关闭 2FA
-        </button>
+        <div className="settings" style={{ marginTop: '0.5rem' }}>
+          <label>
+            登录密码
+            <input
+              type="password"
+              value={disablePass}
+              autoComplete="current-password"
+              onChange={(e) => setDisablePass(e.target.value)}
+              placeholder="关闭前需要验证身份"
+            />
+          </label>
+          <label>
+            当前 6 位验证码
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={disableCode}
+              onChange={(e) => setDisableCode(e.target.value)}
+              placeholder="000000"
+            />
+          </label>
+          <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void disable()}>
+            关闭 2FA
+          </button>
+        </div>
       ) : (
         <>
           <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void start()}>

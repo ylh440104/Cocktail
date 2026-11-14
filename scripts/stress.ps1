@@ -218,6 +218,18 @@ $limited = ($codes | Where-Object { $_ -eq 429 }).Count
 Log "  statuses: $($codes -join ',')"
 Record "login-ratelimit" (Alive) "429 count=$limited"
 
+Log "=== phase 18 2fa guard ==="
+try {
+  $st1 = Req "POST" "/api/v1/auth/2fa/disable" '{}' 10
+  Log "  disable without creds status=$st1"
+  $st2 = Req "POST" "/api/v1/auth/2fa/disable" ('{"password":"wrong","totp_code":123456}') 10
+  Log "  disable with wrong password status=$st2"
+  $blocked = 0
+  if ($st1 -ne 200) { $blocked++ }
+  if ($st2 -ne 200) { $blocked++ }
+  Record "2fa-disable-guard" (Alive) "blocked=$blocked/2"
+} catch { Record "2fa-disable-guard" (Alive) "error: $_" }
+
 Log "=== phase 14 missing fields ==="
 $miss = @('{}', '{"target":null,"reason":null}', '{"target":[],"reason":{}}', '{"target":1,"reason":true}')
 foreach ($m in $miss) { $null = Req "POST" "/api/v1/bans" $m 10; $null = Req "POST" "/api/v1/tickets" $m 10 }

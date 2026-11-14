@@ -213,7 +213,6 @@ pub async fn login(
             .into_response();
     }
     let admin = found.expect("checked");
-    state.login_limiter.reset(&rate_key);
     let totp_enabled = crate::db::admin_2fa_enabled(&conn, admin.id).unwrap_or(false);
     let totp_secret = crate::db::admin_totp_secret(&conn, admin.id)
         .ok()
@@ -245,6 +244,7 @@ pub async fn login(
         }
     }
     let _ = crate::db::clear_login_failures(&conn, &admin.username);
+    state.login_limiter.reset(&rate_key);
     crate::auth::login_succeeded(&rate_key);
     let (token, csrf) = match crate::auth::create_session(&conn, &admin) {
         Ok(t) => t,
@@ -380,6 +380,15 @@ pub async fn totp_setup(
             }),
         )
     })?;
+    let already = crate::db::admin_2fa_enabled(&conn, admin.id).unwrap_or(false);
+    if already {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorBody {
+                error: "两步验证已启用，请先禁用后再重新绑定".into(),
+            }),
+        ));
+    }
     let secret = crate::totp::generate_secret().map_err(|e| bad_request(e.to_string()))?;
     let url = crate::totp::otpauth_url(&secret, &admin.username, "Cocktail Manager");
     crate::db::set_admin_totp_pending(&conn, admin.id, &secret)
@@ -479,10 +488,23 @@ pub async fn totp_status(
     Ok(Json(serde_json::json!({ "enabled": enabled })))
 }
 
+#[derive(Deserialize)]
+pub struct TotpDisableBody {
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub totp_code: Option<u32>,
+}
+
 pub async fn totp_disable(
     State(state): State<SharedState>,
     headers: HeaderMap,
+    body: Option<Json<TotpDisableBody>>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorBody>)> {
+    let body = body.map(|Json(v)| v).unwrap_or(TotpDisableBody {
+        password: None,
+        totp_code: None,
+    });
     let token = bearer_from_headers(&headers).ok_or_else(|| {
         (
             StatusCode::UNAUTHORIZED,
@@ -509,6 +531,34 @@ pub async fn totp_disable(
             }),
         )
     })?;
+    let enabled = crate::db::admin_2fa_enabled(&conn, admin.id).unwrap_or(false);
+    if enabled {
+        let password = body.password.as_deref().unwrap_or("").trim();
+        if password.is_empty() || !crate::auth::verify_password(password, &admin.password_hash) {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorBody {
+                    error: "禁用两步验证需要提供正确的登录密码".into(),
+                }),
+            ));
+        }
+        let secret = crate::db::admin_totp_secret(&conn, admin.id)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let ok = match body.totp_code {
+            Some(code) if !secret.is_empty() => crate::totp::verify_code(&secret, code),
+            _ => false,
+        };
+        if !ok {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorBody {
+                    error: "禁用两步验证需要提供当前验证码".into(),
+                }),
+            ));
+        }
+    }
     crate::db::set_admin_totp(&conn, admin.id, None).map_err(|e| bad_request(e.to_string()))?;
     util::audit(
         "auth.2fa_disable",
